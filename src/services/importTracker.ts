@@ -93,9 +93,6 @@ namespace ts.FindAllReferences {
                                         break;
                                     }
                                 }
-
-                                // Don't support re-exporting 'require()' calls, so just add a single indirect user.
-                                addIndirectUser(direct.getSourceFile());
                             }
                             break;
 
@@ -373,7 +370,7 @@ namespace ts.FindAllReferences {
 
     /** Returns a map from a module symbol Id to all import statements that directly reference the module. */
     function getDirectImportsMap(sourceFiles: readonly SourceFile[], checker: TypeChecker, cancellationToken: CancellationToken | undefined): ESMap<string, ImporterOrCallExpression[]> {
-        const map = createMap<ImporterOrCallExpression[]>();
+        const map = new Map<string, ImporterOrCallExpression[]>();
 
         for (const sourceFile of sourceFiles) {
             if (cancellationToken) cancellationToken.throwIfCancellationRequested();
@@ -607,6 +604,8 @@ namespace ts.FindAllReferences {
             case SyntaxKind.NamespaceImport:
                 Debug.assert((parent as ImportClause | NamespaceImport).name === node);
                 return true;
+            case SyntaxKind.BindingElement:
+                return isInJSFile(node) && isRequireVariableDeclaration(parent, /*requireStringLiteralLikeArgument*/ true);
             default:
                 return false;
         }
@@ -627,6 +626,14 @@ namespace ts.FindAllReferences {
             for (const declaration of symbol.declarations) {
                 if (isExportSpecifier(declaration) && !declaration.propertyName && !declaration.parent.parent.moduleSpecifier) {
                     return checker.getExportSpecifierLocalTargetSymbol(declaration)!;
+                }
+                else if (isPropertyAccessExpression(declaration) && isModuleExportsAccessExpression(declaration.expression) && !isPrivateIdentifier(declaration.name)) {
+                    return checker.getExportSpecifierLocalTargetSymbol(declaration.name)!;
+                }
+                else if (isShorthandPropertyAssignment(declaration)
+                    && isBinaryExpression(declaration.parent.parent)
+                    && getAssignmentDeclarationKind(declaration.parent.parent) === AssignmentDeclarationKind.ModuleExports) {
+                    return checker.getExportSpecifierLocalTargetSymbol(declaration.name)!;
                 }
             }
         }

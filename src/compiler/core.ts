@@ -40,15 +40,23 @@ namespace ts {
     }
 
     export const emptyArray: never[] = [] as never[];
+    export const emptyMap: ReadonlyESMap<never, never> = new Map<never, never>();
+    export const emptySet: ReadonlySet<never> = new Set<never>();
 
-    /** Create a new map. */
+    /**
+     * Create a new map.
+     * @deprecated Use `new Map()` instead.
+     */
     export function createMap<K, V>(): ESMap<K, V>;
     export function createMap<T>(): ESMap<string, T>;
     export function createMap<K, V>(): ESMap<K, V> {
         return new Map<K, V>();
     }
 
-    /** Create a new map from a template object is provided, the map will copy entries from it. */
+    /**
+     * Create a new map from a template object is provided, the map will copy entries from it.
+     * @deprecated Use `new Map(getEntries(template))` instead.
+     */
     export function createMapFromTemplate<T>(template: MapLike<T>): ESMap<string, T> {
         const map: ESMap<string, T> = new Map<string, T>();
 
@@ -588,6 +596,15 @@ namespace ts {
             });
             return result;
         }
+    }
+
+    export function getOrUpdate<K, V>(map: ESMap<K, V>, key: K, callback: () => V) {
+        if (map.has(key)) {
+            return map.get(key)!;
+        }
+        const value = callback();
+        map.set(key, value);
+        return value;
     }
 
     export function tryAddToSet<T>(set: Set<T>, value: T) {
@@ -1178,7 +1195,7 @@ namespace ts {
      * @param keyComparer A callback used to compare two keys in a sorted array.
      * @param offset An offset into `array` at which to start the search.
      */
-    export function binarySearchKey<T, U>(array: readonly T[], key: U, keySelector: (v: T) => U, keyComparer: Comparer<U>, offset?: number): number {
+    export function binarySearchKey<T, U>(array: readonly T[], key: U, keySelector: (v: T, i: number) => U, keyComparer: Comparer<U>, offset?: number): number {
         if (!some(array)) {
             return -1;
         }
@@ -1187,7 +1204,7 @@ namespace ts {
         let high = array.length - 1;
         while (low <= high) {
             const middle = low + ((high - low) >> 1);
-            const midKey = keySelector(array[middle]);
+            const midKey = keySelector(array[middle], middle);
             switch (keyComparer(midKey, key)) {
                 case Comparison.LessThan:
                     low = middle + 1;
@@ -1285,6 +1302,19 @@ namespace ts {
         }
 
         return values;
+    }
+
+    const _entries = Object.entries || (<T>(obj: MapLike<T>) => {
+        const keys = getOwnKeys(obj);
+        const result: [string, T][] = Array(keys.length);
+        for (let i = 0; i < keys.length; i++) {
+            result[i] = [keys[i], obj[keys[i]]];
+        }
+        return result;
+    });
+
+    export function getEntries<T>(obj: MapLike<T>): [string, T][] {
+        return obj ? _entries(obj) : [];
     }
 
     export function arrayOf<T>(count: number, f: (index: number) => T): T[] {
@@ -1387,9 +1417,11 @@ namespace ts {
         return result;
     }
 
+    export function group<T, K>(values: readonly T[], getGroupId: (value: T) => K): readonly (readonly T[])[];
+    export function group<T, K, R>(values: readonly T[], getGroupId: (value: T) => K, resultSelector: (values: readonly T[]) => R): R[];
     export function group<T>(values: readonly T[], getGroupId: (value: T) => string): readonly (readonly T[])[];
     export function group<T, R>(values: readonly T[], getGroupId: (value: T) => string, resultSelector: (values: readonly T[]) => R): R[];
-    export function group<T>(values: readonly T[], getGroupId: (value: T) => string, resultSelector: (values: readonly T[]) => readonly T[] = identity): readonly (readonly T[])[] {
+    export function group<T, K>(values: readonly T[], getGroupId: (value: T) => K, resultSelector: (values: readonly T[]) => readonly T[] = identity): readonly (readonly T[])[] {
         return arrayFrom(arrayToMultiMap(values, getGroupId).values(), resultSelector);
     }
 
@@ -1608,7 +1640,7 @@ namespace ts {
 
     /** A version of `memoize` that supports a single primitive argument */
     export function memoizeOne<A extends string | number | boolean | undefined, T>(callback: (arg: A) => T): (arg: A) => T {
-        const map = createMap<T>();
+        const map = new Map<string, T>();
         return (arg: A) => {
             const key = `${typeof arg}:${arg}`;
             let value = map.get(key);
@@ -2218,18 +2250,36 @@ namespace ts {
         }
     }
 
-    export function padLeft(s: string, length: number) {
-        while (s.length < length) {
-            s = " " + s;
-        }
-        return s;
+
+    /**
+     * Returns string left-padded with spaces or zeros until it reaches the given length.
+     *
+     * @param s String to pad.
+     * @param length Final padded length. If less than or equal to 's.length', returns 's' unchanged.
+     * @param padString Character to use as padding (default " ").
+     */
+    export function padLeft(s: string, length: number, padString: " " | "0" = " ") {
+        return length <= s.length ? s : padString.repeat(length - s.length) + s;
     }
 
-    export function padRight(s: string, length: number) {
-        while (s.length < length) {
-            s = s + " ";
-        }
+    /**
+     * Returns string right-padded with spaces until it reaches the given length.
+     *
+     * @param s String to pad.
+     * @param length Final padded length. If less than or equal to 's.length', returns 's' unchanged.
+     * @param padString Character to use as padding (default " ").
+     */
+    export function padRight(s: string, length: number, padString: " " = " ") {
+        return length <= s.length ? s : s + padString.repeat(length - s.length);
+    }
 
-        return s;
+    export function takeWhile<T, U extends T>(array: readonly T[], predicate: (element: T) => element is U): U[];
+    export function takeWhile<T>(array: readonly T[], predicate: (element: T) => boolean): T[] {
+        const len = array.length;
+        let index = 0;
+        while (index < len && predicate(array[index])) {
+            index++;
+        }
+        return array.slice(0, index);
     }
 }

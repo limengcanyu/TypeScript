@@ -23,6 +23,7 @@ namespace ts {
         /* @internal */ extendedDiagnostics?: boolean;
         /* @internal */ locale?: string;
         /* @internal */ generateCpuProfile?: string;
+        /* @internal */ generateTrace?: string;
 
         [option: string]: CompilerOptionsValue | undefined;
     }
@@ -63,7 +64,7 @@ namespace ts {
     }
 
     function getOrCreateValueMapFromConfigFileMap<T>(configFileMap: ESMap<ResolvedConfigFilePath, ESMap<string, T>>, resolved: ResolvedConfigFilePath): ESMap<string, T> {
-        return getOrCreateValueFromConfigFileMap<ESMap<string, T>>(configFileMap, resolved, createMap);
+        return getOrCreateValueFromConfigFileMap<ESMap<string, T>>(configFileMap, resolved, () => new Map());
     }
 
     function newer(date1: Date, date2: Date): Date {
@@ -208,7 +209,7 @@ namespace ts {
         originalGetSourceFile: CompilerHost["getSourceFile"];
     }
 
-    interface SolutionBuilderState<T extends BuilderProgram = BuilderProgram> {
+    interface SolutionBuilderState<T extends BuilderProgram = BuilderProgram> extends WatchFactory<WatchType, ResolvedConfigFileName> {
         readonly host: SolutionBuilderHost<T>;
         readonly hostWithWatch: SolutionBuilderWithWatchHost<T>;
         readonly currentDirectory: string;
@@ -255,9 +256,6 @@ namespace ts {
 
         timerToBuildInvalidatedProject: any;
         reportFileChangeDetected: boolean;
-        watchFile: WatchFile<WatchType, ResolvedConfigFileName>;
-        watchFilePath: WatchFilePath<WatchType, ResolvedConfigFileName>;
-        watchDirectory: WatchDirectory<WatchType, ResolvedConfigFileName>;
         writeLog: (s: string) => void;
     }
 
@@ -281,7 +279,7 @@ namespace ts {
                 loadWithLocalCache<ResolvedModuleFull>(Debug.checkEachDefined(moduleNames), containingFile, redirectedReference, loader);
         }
 
-        const { watchFile, watchFilePath, watchDirectory, writeLog } = createWatchFactory<ResolvedConfigFileName>(hostWithWatch, options);
+        const { watchFile, watchDirectory, writeLog } = createWatchFactory<ResolvedConfigFileName>(hostWithWatch, options);
 
         const state: SolutionBuilderState<T> = {
             host,
@@ -330,7 +328,6 @@ namespace ts {
             timerToBuildInvalidatedProject: undefined,
             reportFileChangeDetected: false,
             watchFile,
-            watchFilePath,
             watchDirectory,
             writeLog,
         };
@@ -439,10 +436,12 @@ namespace ts {
 
         // Clear all to ResolvedConfigFilePaths cache to start fresh
         state.resolvedConfigFilePaths.clear();
-        const currentProjects = arrayToSet(
-            getBuildOrderFromAnyBuildOrder(buildOrder),
-            resolved => toResolvedConfigFilePath(state, resolved)
-        ) as ESMap<ResolvedConfigFilePath, true>;
+
+        // TODO(rbuckton): Should be a `Set`, but that requires changing the code below that uses `mutateMapSkippingNewValues`
+        const currentProjects = new Map(
+            getBuildOrderFromAnyBuildOrder(buildOrder).map(
+                resolved => [toResolvedConfigFilePath(state, resolved), true as true])
+        );
 
         const noopOnDelete = { onDeleteValue: noop };
         // Config file cache
@@ -1780,7 +1779,6 @@ namespace ts {
     function watchConfigFile(state: SolutionBuilderState, resolved: ResolvedConfigFileName, resolvedPath: ResolvedConfigFilePath, parsed: ParsedCommandLine | undefined) {
         if (!state.watch || state.allWatchedConfigFiles.has(resolvedPath)) return;
         state.allWatchedConfigFiles.set(resolvedPath, state.watchFile(
-            state.hostWithWatch,
             resolved,
             () => {
                 invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.Full);
@@ -1796,9 +1794,8 @@ namespace ts {
         if (!state.watch) return;
         updateWatchingWildcardDirectories(
             getOrCreateValueMapFromConfigFileMap(state.allWatchedWildcardDirectories, resolvedPath),
-            createMapFromTemplate(parsed.configFileSpecs!.wildcardDirectories),
+            new Map(getEntries(parsed.configFileSpecs!.wildcardDirectories)),
             (dir, flags) => state.watchDirectory(
-                state.hostWithWatch,
                 dir,
                 fileOrDirectory => {
                     if (isIgnoredFileFromWildCardWatching({
@@ -1830,13 +1827,11 @@ namespace ts {
             getOrCreateValueMapFromConfigFileMap(state.allWatchedInputFiles, resolvedPath),
             arrayToMap(parsed.fileNames, fileName => toPath(state, fileName)),
             {
-                createNewValue: (path, input) => state.watchFilePath(
-                    state.hostWithWatch,
+                createNewValue: (_path, input) => state.watchFile(
                     input,
                     () => invalidateProjectAndScheduleBuilds(state, resolvedPath, ConfigFileProgramReloadLevel.None),
                     PollingInterval.Low,
                     parsed?.watchOptions,
-                    path as Path,
                     WatchType.SourceFile,
                     resolved
                 ),
@@ -1911,9 +1906,7 @@ namespace ts {
     }
 
     function reportWatchStatus(state: SolutionBuilderState, message: DiagnosticMessage, ...args: (string | number | undefined)[]) {
-        if (state.hostWithWatch.onWatchStatusChange) {
-            state.hostWithWatch.onWatchStatusChange(createCompilerDiagnostic(message, ...args), state.host.getNewLine(), state.baseCompilerOptions);
-        }
+        state.hostWithWatch.onWatchStatusChange?.(createCompilerDiagnostic(message, ...args), state.host.getNewLine(), state.baseCompilerOptions);
     }
 
     function reportErrors({ host }: SolutionBuilderState, errors: readonly Diagnostic[]) {

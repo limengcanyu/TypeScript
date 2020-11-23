@@ -1,7 +1,7 @@
 namespace ts {
     // WARNING: The script `configurePrerelease.ts` uses a regexp to parse out these values.
     // If changing the text in this section, be sure to test `configurePrerelease` too.
-    export const versionMajorMinor = "4.0";
+    export const versionMajorMinor = "4.2";
     /** The version of the TypeScript compiler release */
     export const version = `${versionMajorMinor}.0-dev`;
 
@@ -45,7 +45,6 @@ namespace ts {
 
     /**
      * ES6 Map interface, only read methods included.
-     * @deprecated Use `ts.ReadonlyESMap<K, V>` instead.
      */
     export interface ReadonlyMap<T> extends ReadonlyESMap<string, T> {
     }
@@ -57,7 +56,6 @@ namespace ts {
 
     /**
      * ES6 Map interface.
-     * @deprecated Use `ts.ESMap<K, V>` instead.
      */
     export interface Map<T> extends ESMap<string, T> {
     }
@@ -90,7 +88,7 @@ namespace ts {
 
     /** ES6 Iterator type. */
     export interface Iterator<T> {
-        next(): { value: T, done?: false } | { value: never, done: true };
+        next(): { value: T, done?: false } | { value: void, done: true };
     }
 
     /** Array that is only intended to be pushed to, never read. */
